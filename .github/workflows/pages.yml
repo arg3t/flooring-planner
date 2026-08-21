@@ -1,0 +1,79 @@
+name: Build and deploy to Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege: read the code, and mint the token Pages needs to publish.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# A deploy already in flight is finished rather than cancelled — cancelling one
+# mid-upload can leave the site serving a half-published artifact.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # `npm ci` rather than `install`: it honours the lockfile exactly, so a
+      # transitive update can never quietly change what gets published.
+      - run: npm ci
+
+      # Build first — the SPA suite drives dist/index.html, so it has nothing to
+      # test until the bundle exists.
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      # Catches the failure mode that would otherwise reach production silently:
+      # a module script tag, or a stray reference to a file that was not inlined,
+      # leaves a blank page for anyone opening the download from disk.
+      - name: Check the bundle is genuinely self-contained
+        run: |
+          set -euo pipefail
+          test -f dist/index.html
+          if grep -q 'type="module"' dist/index.html; then
+            echo "::error::dist/index.html still has a module script; it will not run from file://"
+            exit 1
+          fi
+          if grep -Eq '<(script|link)[^>]+(src|href)="(\./)?assets/' dist/index.html; then
+            echo "::error::dist/index.html references an external asset; the build did not inline everything"
+            exit 1
+          fi
+          echo "self-contained, $(wc -c < dist/index.html) bytes"
+
+      - uses: actions/configure-pages@v5
+        if: github.event_name != 'pull_request'
+
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
+        with:
+          path: dist
+
+  deploy:
+    # Pull requests build and test but must not publish.
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
