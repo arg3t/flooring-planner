@@ -1,7 +1,6 @@
-import React from 'react';
-import { useProject } from '../state/store.jsx';
-import { islands, roomArea } from '../core/geometry.js';
-import ShapeEditor from './ShapeEditor.jsx';
+import { useProject } from '../state/store';
+import { islands, roomArea } from '../core/geometry';
+import ShapeEditor from './ShapeEditor';
 
 export default function RoomList() {
   const { state, dispatch, scale, derivedRooms } = useProject();
@@ -22,7 +21,7 @@ export default function RoomList() {
               <button className="x-btn" onClick={() => dispatch({ type: 'removeRoom', id: room.id })}>✕</button>
             </div>
             <div className="areacheck">
-              <b>{scale.pxPerM ? `${roomArea(derived).toFixed(2)} m²` : '— m²'}</b> · {room.shapes.length} shape(s)
+              <b>{scale.pxPerM && derived ? `${roomArea(derived).toFixed(2)} m²` : '— m²'}</b> · {room.shapes.length} shape(s)
               {pieces > 1 && <><br /><span className="bad">⚠ {pieces} disconnected pieces — drag them together until they snap</span></>}
             </div>
             <ShapeEditor room={room} />

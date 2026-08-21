@@ -6,18 +6,59 @@
  * useMemo rather than stored, so there is no cache to invalidate and no way for
  * pixels and metres to disagree.
  */
-import React, { createContext, useContext, useMemo, useReducer, useEffect, useRef } from 'react';
-import { DEFAULT_MATERIAL, computePlan } from '../core/layout.js';
-import { solveScale } from '../core/scale.js';
-import { deriveRooms } from '../core/derive.js';
-import { weld, WELD_TOL_PX } from '../core/snapping.js';
-import { serialise, saveLocal, loadLocal, clearLocal } from '../core/project.js';
+import React, { createContext, useContext, useMemo, useReducer, useEffect, useRef, type ReactNode } from 'react';
+import { DEFAULT_MATERIAL, computePlan } from '../core/layout';
+import { solveScale } from '../core/scale';
+import { deriveRooms } from '../core/derive';
+import { weld, WELD_TOL_PX } from '../core/snapping';
+import { serialise, saveLocal, loadLocal, clearLocal } from '../core/project';
+import type {
+  DerivedRoom, DeserialisedData, Edge, Material, Pin, Plan, Room, ScaleBar, ScaleResult, ShapePx,
+} from '../core/types';
 
-const ProjectContext = createContext(null);
+export interface IoNote {
+  kind: 'ok' | 'bad';
+  text: string;
+}
 
-const blankRoom = (id, n) => ({ id, name: `Room ${n}`, code: `R${n}`, dir: 'x', skip: false, shapes: [], add: [], sub: [] });
+export interface State {
+  image: HTMLImageElement | null;
+  imageData: string | null;
+  imageName: string | null;
+  rooms: Room[];
+  pins: Pin[];
+  scaleBar: ScaleBar | null;
+  material: Material;
+  nextRoomId: number;
+  nextShapeId: number;
+  nextPinId: number;
+  saveNote: string;
+  ioNote: IoNote | null;
+}
 
-export const initialState = () => ({
+export type Action =
+  | { type: 'setImage'; image: HTMLImageElement; dataUrl: string | null; name: string }
+  | { type: 'addRoom' }
+  | { type: 'removeRoom'; id: number }
+  | { type: 'patchRoom'; id: number; patch: Partial<Room> }
+  | { type: 'addShape'; roomId: number; shape: Omit<ShapePx, 'id'> }
+  | { type: 'commitShapes'; roomId: number; shapes: ShapePx[]; zoom?: number }
+  | { type: 'removeShape'; roomId: number; shapeId: number }
+  | { type: 'setPin'; roomId: number; shapeId: number; edge: Edge; metres: number }
+  | { type: 'clearPin'; roomId: number; shapeId: number; edge: Edge }
+  | { type: 'dropPin'; id: number }
+  | { type: 'setScaleBar'; bar: ScaleBar }
+  | { type: 'setMaterial'; key: keyof Material; value: number }
+  | { type: 'loadProject'; data: DeserialisedData; image?: HTMLImageElement | null; quiet?: boolean; note?: IoNote | null }
+  | { type: 'reset' }
+  | { type: 'note'; note: IoNote | null }
+  | { type: 'saveNote'; note: string };
+
+const blankRoom = (id: number, n: number): Room => (
+  { id, name: `Room ${n}`, code: `R${n}`, dir: 'x', skip: false, shapes: [], add: [], sub: [] }
+);
+
+export const initialState = (): State => ({
   image: null, imageData: null, imageName: '',
   rooms: [blankRoom(1, 1)],
   pins: [], scaleBar: null,
@@ -27,7 +68,7 @@ export const initialState = () => ({
   ioNote: null,
 });
 
-function reducer(state, action) {
+function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'setImage':
       return { ...state, image: action.image, imageData: action.dataUrl, imageName: action.name };
@@ -46,7 +87,7 @@ function reducer(state, action) {
       return { ...state, rooms: state.rooms.map((r) => (r.id === action.id ? { ...r, ...action.patch } : r)) };
 
     case 'addShape': {
-      const shape = { ...action.shape, id: state.nextShapeId };
+      const shape: ShapePx = { ...action.shape, id: state.nextShapeId };
       return {
         ...state,
         nextShapeId: state.nextShapeId + 1,
@@ -110,7 +151,17 @@ function reducer(state, action) {
   }
 }
 
-export function ProjectProvider({ children }) {
+export interface ProjectContextValue {
+  state: State;
+  dispatch: React.Dispatch<Action>;
+  scale: ScaleResult;
+  derivedRooms: DerivedRoom[];
+  plan: Plan;
+}
+
+const ProjectContext = createContext<ProjectContextValue | null>(null);
+
+export function ProjectProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, undefined, initialState);
 
   // restore before first paint so the user never sees an empty app flash
@@ -120,7 +171,7 @@ export function ProjectProvider({ children }) {
     restored.current = true;
     const saved = loadLocal();
     if (!saved) return;
-    if (saved.unavailable) { dispatch({ type: 'saveNote', note: 'autosave unavailable — use Save file' }); return; }
+    if ('unavailable' in saved) { dispatch({ type: 'saveNote', note: 'autosave unavailable — use Save file' }); return; }
     // geometry first: it is the part that took work and must not wait on an image
     dispatch({ type: 'loadProject', data: saved, quiet: true });
     if (saved.imageData) {
@@ -135,7 +186,7 @@ export function ProjectProvider({ children }) {
   const plan = useMemo(() => computePlan(derivedRooms, state.material), [derivedRooms, state.material]);
 
   // autosave, debounced so a drag does not write on every frame
-  const timer = useRef(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const dead = useRef(false);
   useEffect(() => {
     if (dead.current || !restored.current) return;
@@ -170,7 +221,7 @@ export function ProjectProvider({ children }) {
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>;
 }
 
-export function useProject() {
+export function useProject(): ProjectContextValue {
   const ctx = useContext(ProjectContext);
   if (!ctx) throw new Error('useProject must be used inside <ProjectProvider>');
   return ctx;

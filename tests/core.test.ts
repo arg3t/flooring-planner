@@ -1,14 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { roomOutline, islands, roomArea, bandSpans, stackBands } from '../src/core/geometry.js';
-import { layoutRoom, packCuts, computePlan, DEFAULT_MATERIAL } from '../src/core/layout.js';
-import { solveScale } from '../src/core/scale.js';
-import { deriveRoom, deriveRooms } from '../src/core/derive.js';
-import { weld, snapValue, snapCandidates } from '../src/core/snapping.js';
-import { serialise, validate, deserialise } from '../src/core/project.js';
+import { roomOutline, islands, bandSpans } from '../src/core/geometry';
+import { layoutRoom, packCuts, computePlan, DEFAULT_MATERIAL, type LayoutState } from '../src/core/layout';
+import { solveScale } from '../src/core/scale';
+import { deriveRoom, deriveRooms } from '../src/core/derive';
+import { weld, snapValue, snapCandidates } from '../src/core/snapping';
+import { serialise, validate, deserialise, type SerialisableState } from '../src/core/project';
+import type { DerivedRoom, Dir, Piece, RectM } from '../src/core/types';
 
-const rect = (x, y, w, h) => ({ x, y, w, h });
-const room = (add, dir = 'x') => ({ id: 1, code: 'R', dir, add, sub: [], shapes: [] });
+const rect = (x: number, y: number, w: number, h: number): RectM => ({ x, y, w, h });
+const room = (add: RectM[], dir: Dir = 'x'): DerivedRoom => ({ id: 1, name: 'R', code: 'R', dir, skip: false, add, sub: [], shapes: [] });
 
 test('outline of a plain rectangle is four edges of the right lengths', () => {
   const segs = roomOutline(room([rect(0, 0, 5, 3)]));
@@ -35,7 +36,7 @@ test('a row splits into separate runs where the shape breaks', () => {
 
 test('rows tile the coverable run exactly, with no sliver at the far wall', () => {
   const r = room([rect(0, 0, 5.86, 3.06)]);
-  const state = { lastEnd: null };
+  const state: LayoutState = { lastEnd: null };
   const L = layoutRoom(r, DEFAULT_MATERIAL, state);
   L.rows.forEach((row) => {
     const spans = bandSpans(r, row.s0, row.s1, DEFAULT_MATERIAL.gap);
@@ -57,7 +58,7 @@ test('adjacent rows keep the seam stagger', () => {
 });
 
 test('packing never over-fills a plank and charges kerf per extra cut', () => {
-  const pieces = [610, 610, 400, 300, 900, 250].map((len, i) => ({ len, id: i }));
+  const pieces: Piece[] = [610, 610, 400, 300, 900, 250].map((len) => ({ x: 0, len, full: false }));
   const bins = packCuts(pieces, 1220, 2);
   bins.forEach((b) => {
     const used = b.pieces.reduce((a, p) => a + p.len, 0) + 2 * (b.pieces.length - 1);
@@ -69,7 +70,7 @@ test('packing never over-fills a plank and charges kerf per extra cut', () => {
 });
 
 test('packing beats one-plank-per-piece', () => {
-  const pieces = Array.from({ length: 40 }, (_, i) => ({ len: 300 + (i % 5) * 100 }));
+  const pieces: Piece[] = Array.from({ length: 40 }, (_, i) => ({ x: 0, full: false, len: 300 + (i % 5) * 100 }));
   const bins = packCuts(pieces, 1220, 2);
   assert.ok(bins.length < pieces.length, 'pairing must save planks');
 });
@@ -81,10 +82,10 @@ test('scale: no known length means no measurement', () => {
 
 test('scale: one pin determines everything', () => {
   const rooms = [{ id: 1, shapes: [{ id: 1, x: 0, y: 0, w: 500, h: 300 }] }];
-  const pins = [{ id: 1, roomId: 1, shapeId: 1, edge: 'top', metres: 5 }];
+  const pins = [{ id: 1, roomId: 1, shapeId: 1, edge: 'top' as const, metres: 5 }];
   const { pxPerM } = solveScale(rooms, pins, null);
   assert.equal(pxPerM, 100);
-  const d = deriveRoom({ ...rooms[0], code: 'R', dir: 'x' }, pxPerM);
+  const d = deriveRoom({ ...rooms[0], name: 'R', code: 'R', dir: 'x' as const, skip: false, sub: [] }, pxPerM);
   assert.equal(d.add[0].w, 5);
   assert.equal(d.add[0].h, 3);
 });
@@ -92,18 +93,18 @@ test('scale: one pin determines everything', () => {
 test('scale: conflicting pins resolve toward the longer, more reliable edge', () => {
   const rooms = [{ id: 1, shapes: [{ id: 1, x: 0, y: 0, w: 500, h: 300 }] }];
   const pins = [
-    { id: 1, roomId: 1, shapeId: 1, edge: 'top', metres: 5.0 },
-    { id: 2, roomId: 1, shapeId: 1, edge: 'left', metres: 3.3 },
+    { id: 1, roomId: 1, shapeId: 1, edge: 'top' as const, metres: 5.0 },
+    { id: 2, roomId: 1, shapeId: 1, edge: 'left' as const, metres: 3.3 },
   ];
   const { pxPerM, residual } = solveScale(rooms, pins, null);
   const expected = (500 * (500 / 5) + 300 * (300 / 3.3)) / 800;
-  assert.ok(Math.abs(pxPerM - expected) < 0.01);
-  assert.ok(residual > 5, 'the disagreement must be reported');
+  assert.ok(Math.abs((pxPerM as number) - expected) < 0.01);
+  assert.ok((residual as number) > 5, 'the disagreement must be reported');
 });
 
 test('scale: a degenerate edge is not accepted as calibration', () => {
   const rooms = [{ id: 1, shapes: [{ id: 1, x: 0, y: 0, w: 3, h: 3 }] }];
-  const pins = [{ id: 1, roomId: 1, shapeId: 1, edge: 'top', metres: 4 }];
+  const pins = [{ id: 1, roomId: 1, shapeId: 1, edge: 'top' as const, metres: 4 }];
   assert.equal(solveScale(rooms, pins, null).pxPerM, null);
 });
 
@@ -146,19 +147,20 @@ test('islands detects a room drawn in disconnected pieces', () => {
 
 test('computePlan on an empty set says so instead of returning zeros', () => {
   assert.equal(computePlan([], {}).empty, true);
-  assert.equal(computePlan([{ skip: false, add: [] }], {}).empty, true);
+  assert.equal(computePlan([{ id: 1, name: 'A', code: 'A', dir: 'x', skip: false, shapes: [], sub: [], add: [] }], {}).empty, true);
 });
 
 test('computePlan buys enough material to cover the floor', () => {
-  const rooms = [{ id: 1, code: 'A', name: 'A', dir: 'x', skip: false, shapes: [], sub: [], add: [rect(0, 0, 5.86, 3.06)] }];
+  const rooms: DerivedRoom[] = [{ id: 1, code: 'A', name: 'A', dir: 'x', skip: false, shapes: [], sub: [], add: [rect(0, 0, 5.86, 3.06)] }];
   const plan = computePlan(rooms, {});
+  if (plan.empty) throw new Error('plan must not be empty');
   assert.ok(plan.buyArea >= plan.area, 'must not buy less than the floor');
   assert.ok(plan.packs * plan.material.packArea >= plan.buyArea, 'packs must cover the planks');
   assert.ok(plan.bins.length < plan.allCuts.length, 'offcuts must be paired');
 });
 
 test('project round-trip reproduces geometry and scale exactly', () => {
-  const state = {
+  const state: SerialisableState = {
     imageData: 'data:image/png;base64,AA', imageName: 'plan.png', scaleBar: null,
     material: { ...DEFAULT_MATERIAL },
     rooms: [{ id: 7, name: 'Hall', code: 'HA', dir: 'y', skip: false, shapes: [{ id: 3, x: 10, y: 20, w: 400, h: 300 }], add: [], sub: [] }],
@@ -184,7 +186,7 @@ test('validate rejects junk with a reason', () => {
 });
 
 test('derived rooms place each room at its own origin', () => {
-  const rooms = [{ id: 1, code: 'A', dir: 'x', shapes: [{ id: 1, x: 500, y: 500, w: 100, h: 100 }] }];
+  const rooms = [{ id: 1, code: 'A', dir: 'x' as const, shapes: [{ id: 1, x: 500, y: 500, w: 100, h: 100 }] }];
   const [d] = deriveRooms(rooms, 100);
   assert.equal(d.add[0].x, 0);
   assert.equal(d.add[0].y, 0);

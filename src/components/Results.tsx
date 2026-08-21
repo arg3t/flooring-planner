@@ -1,15 +1,15 @@
-import React from 'react';
-import { useProject } from '../state/store.jsx';
-import { roomOutline, toRunStack } from '../core/geometry.js';
-import { islands } from '../core/geometry.js';
-import Tooltip from './Tooltip.jsx';
+import type { ReactElement } from 'react';
+import { useProject } from '../state/store';
+import { islands, roomOutline, toRunStack } from '../core/geometry';
+import Tooltip from './Tooltip';
+import type { DerivedRoom, RoomLayout } from '../core/types';
 
 /** Screen diagram. Shares its geometry with the printed one but keeps colour,
  *  which is free on a screen and faster to read. */
-function RoomDiagram({ layout, room }) {
+function RoomDiagram({ layout, room }: { layout: RoomLayout; room: DerivedRoom }) {
   const sc = Math.min(570 / layout.runMax, 290 / layout.stackMax, 0.3);
   const w = layout.runMax * sc, h = layout.stackMax * sc, pl = 46, pt = 46;
-  const parts = [];
+  const parts: ReactElement[] = [];
   parts.push(<rect key="wall" x={pl} y={pt} width={w} height={h} fill="none" stroke="var(--grid)" strokeDasharray="3 3" />);
   (room.sub || []).forEach((sq, i) => {
     const m = toRunStack(room, sq);
@@ -27,8 +27,8 @@ function RoomDiagram({ layout, room }) {
         fontSize="8.5" fontFamily="IBM Plex Mono" fill="#241207" textAnchor="middle">{p.pieceId}</text>);
     }
   }));
-  const map = (x, y) => (room.dir === 'x' ? [x * 1000, y * 1000] : [y * 1000, x * 1000]);
-  const placed = [];
+  const map = (x: number, y: number): [number, number] => (room.dir === 'x' ? [x * 1000, y * 1000] : [y * 1000, x * 1000]);
+  const placed: { x: number; y: number }[] = [];
   roomOutline(room).slice().sort((a, b) => b.len - a.len).forEach((sg, i) => {
     if (sg.len < 0.3) return;
     const a = sg.vertical ? map(sg.x, sg.y1) : map(sg.x1, sg.y);
@@ -38,7 +38,7 @@ function RoomDiagram({ layout, room }) {
     let nx = 0, ny = 0;
     if (sg.vertical) { if (room.dir === 'x') nx = sg.out; else ny = sg.out; }
     else if (room.dir === 'x') ny = sg.out; else nx = sg.out;
-    let off = 12, tx, ty, tries = 0, clash;
+    let off = 12, tx = 0, ty = 0, tries = 0, clash;
     do {
       tx = pl + mx * sc + nx * off;
       ty = pt + my * sc + ny * off + (onH ? (ny > 0 ? 7 : -3) : 3);
@@ -56,7 +56,7 @@ function RoomDiagram({ layout, room }) {
 }
 
 export default function Results() {
-  const { plan, state } = useProject();
+  const { plan } = useProject();
   if (plan.empty) return null;
   const { layouts, bins, full, area, totalPlanks, packs, cuts, overPct, costIncVat, allCuts, material } = plan;
   const broken = layouts.map((l) => l.room).filter((r) => islands(r).length > 1);
@@ -66,9 +66,9 @@ export default function Results() {
       <section className="panel">
         <h2><span className="n">04</span> Totals</h2>
         <div className="summary-grid">
-          {[[`${area.toFixed(1)} m²`, 'Floor to cover'], [totalPlanks, 'Planks total'], [full, 'Used whole'],
+          {([[`${area.toFixed(1)} m²`, 'Floor to cover'], [totalPlanks, 'Planks total'], [full, 'Used whole'],
             [bins.length, 'Planks to cut'], [cuts, 'Saw cuts'], [packs, `Packs @ ${material.packArea} m²`],
-            [`${overPct}%`, 'Over floor area'], [material.packPrice ? `€${costIncVat}` : '—', 'Total inc. VAT']].map(([v, l]) => (
+            [`${overPct}%`, 'Over floor area'], [material.packPrice ? `€${costIncVat}` : '—', 'Total inc. VAT']] as [string | number, string][]).map(([v, l]) => (
             <div className="stat" key={l}><div className="v">{v}</div><div className="l">{l}</div></div>
           ))}
         </div>
@@ -128,7 +128,7 @@ export default function Results() {
             <div className="plank-strip">
               {b.pieces.map((p, i) => (
                 <div key={p.pieceId} style={{ width: `${(p.len / material.plankLen) * 100}%`, background: i % 2 ? 'var(--oak2)' : 'var(--oak)' }}>
-                  {p.pieceId.split('·')[1]} · {p.len}
+                  {p.pieceId?.split('·')[1]} · {p.len}
                 </div>
               ))}
               {b.waste > 2 && <div className="w" style={{ width: `${(b.waste / material.plankLen) * 100}%` }}>{b.waste}</div>}

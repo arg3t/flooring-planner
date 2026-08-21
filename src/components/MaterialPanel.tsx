@@ -1,8 +1,8 @@
-import React from 'react';
-import { useProject } from '../state/store.jsx';
-import Tooltip from './Tooltip.jsx';
+import { useProject } from '../state/store';
+import Tooltip from './Tooltip';
+import type { Material } from '../core/types';
 
-const FIELDS = [
+const FIELDS: [keyof Material, string][] = [
   ['plankLen', 'Plank length mm'], ['plankWid', 'Plank width mm'],
   ['packArea', 'm² per pack'], ['packPrice', '€ per pack'],
   ['gap', 'Wall gap mm'], ['kerf', 'Saw kerf mm'],

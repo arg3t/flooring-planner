@@ -7,13 +7,19 @@
  * dragging a shape well clear of another must leave it clear, and a room ending
  * up in disconnected pieces is caught by `islands` instead.
  */
+import type { ShapePx } from './types';
 
 export const SNAP_SCREEN_PX = 9; // felt in screen pixels, divided by zoom
 export const WELD_TOL_PX = 3.0;
 
+export interface SnapCandidates {
+  xs: number[];
+  ys: number[];
+}
+
 /** Candidates span every room, so rooms abut each other cleanly too. */
-export function snapCandidates(rooms, exceptShapeId) {
-  const xs = [], ys = [];
+export function snapCandidates(rooms: { shapes: ShapePx[] }[], exceptShapeId: number | null): SnapCandidates {
+  const xs: number[] = [], ys: number[] = [];
   rooms.forEach((r) => r.shapes.forEach((s) => {
     if (s.id === exceptShapeId) return;
     xs.push(s.x, s.x + s.w);
@@ -22,7 +28,7 @@ export function snapCandidates(rooms, exceptShapeId) {
   return { xs, ys };
 }
 
-export function snapValue(v, candidates, tolerance) {
+export function snapValue(v: number, candidates: number[], tolerance: number): number {
   let best = v, bestDistance = tolerance;
   for (const c of candidates) {
     const d = Math.abs(c - v);
@@ -36,20 +42,20 @@ export function snapValue(v, candidates, tolerance) {
  * Idempotent, and provably removes every gap below tolerance — which live
  * snapping alone does not, since each individual edit can land just inside it.
  */
-export function weld(room, tolerance) {
+export function weld<T extends { shapes: ShapePx[] }>(room: T, tolerance: number): T {
   if (!room.shapes.length) return room;
-  const cluster = (get) => {
-    const vals = [];
+  const cluster = (get: (s: ShapePx, i: 0 | 1) => number) => {
+    const vals: number[] = [];
     room.shapes.forEach((s) => { vals.push(get(s, 0)); vals.push(get(s, 1)); });
     vals.sort((a, b) => a - b);
-    const groups = [];
+    const groups: number[][] = [];
     let cur = [vals[0]];
     for (let i = 1; i < vals.length; i++) {
       if (vals[i] - cur[cur.length - 1] <= tolerance) cur.push(vals[i]);
       else { groups.push(cur); cur = [vals[i]]; }
     }
     groups.push(cur);
-    const map = new Map();
+    const map = new Map<number, number>();
     groups.forEach((g) => { const mean = g.reduce((a, b) => a + b, 0) / g.length; g.forEach((v) => map.set(v, mean)); });
     return map;
   };

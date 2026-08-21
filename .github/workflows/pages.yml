@@ -33,6 +33,9 @@ jobs:
       # transitive update can never quietly change what gets published.
       - run: npm ci
 
+      - name: Typecheck
+        run: npm run typecheck
+
       # Build first — the SPA suite drives dist/index.html, so it has nothing to
       # test until the bundle exists.
       - name: Build

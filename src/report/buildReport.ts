@@ -5,15 +5,16 @@
  * actually happens: a job sheet with what to buy and a key plan, room sheets for
  * the floor, and a cut sheet for the saw.
  */
-import { computePlan } from '../core/layout.js';
-import { roomOutline } from '../core/geometry.js';
-import { printSvg, swatch } from './printSvg.js';
-import { keyPlan } from './keyPlan.js';
-import { PRINT_CSS } from './styles.js';
+import { computePlan } from '../core/layout';
+import { roomOutline } from '../core/geometry';
+import { printSvg, swatch } from './printSvg';
+import { keyPlan } from './keyPlan';
+import { PRINT_CSS } from './styles';
+import type { Bin, DerivedRoom, Material, RoomLayout } from '../core/types';
 
 const CONTENT_PX = 718; // A4 content width at 96dpi, ~190mm
 
-export function buildReport(rooms, material, pxPerM) {
+export function buildReport(rooms: DerivedRoom[], material: Partial<Material>, pxPerM: number | null): string | null {
   const plan = computePlan(rooms, material);
   if (plan.empty) return null;
   const { layouts, bins, full, area, totalPlanks, packs, cuts, overPct, costIncVat, costExVat, allCuts } = plan;
@@ -115,14 +116,14 @@ export function buildReport(rooms, material, pxPerM) {
   <div class="hdr"><div><h2>Cut sheet</h2>
     <div class="sub">${bins.length} planks to cut · ${cuts} saw cuts · ${full} more planks used whole, no cutting</div></div>
     <div class="sub">work this before laying</div></div>
-  ${cutSheet(bins, m.plankLen)}
+  ${cutSheet(bins)}
 </section>
 
 <script>window.onload=function(){setTimeout(function(){window.print();},300);}<\/script>
 </body></html>`;
 }
 
-function layOrder(layout, columns) {
+function layOrder(layout: RoomLayout, columns: number): string {
   const rows = layout.rows.map((r, i) => {
     const parts = r.pieces.map((p) => (p.full ? '<span class="fp">full</span>' : `<b>${p.pieceId}</b>`)).join(' ');
     const rip = r.ripped ? ` <span class="rip">rip ${Math.round(r.width)}</span>` : '';
@@ -133,9 +134,9 @@ function layOrder(layout, columns) {
 }
 
 /** A card per plank would run to eight pages; three dense columns fit on one. */
-function cutSheet(bins) {
+function cutSheet(bins: Bin[]): string {
   return `<div class="cuts">${bins.map((b) => {
-    const pieces = b.pieces.map((p) => `<div class="cp"><b>${p.pieceId.split('·')[1]}</b> ${p.len}<span class="dst">${p.room}·r${p.row}</span></div>`).join('');
+    const pieces = b.pieces.map((p) => `<div class="cp"><b>${p.pieceId?.split('·')[1]}</b> ${p.len}<span class="dst">${p.room}·r${p.row}</span></div>`).join('');
     return `<div class="ck"><div class="ckh">${b.label}<span>${b.waste > 2 ? b.waste + ' scrap' : '0 scrap'}</span></div>${pieces}</div>`;
   }).join('')}</div>`;
 }

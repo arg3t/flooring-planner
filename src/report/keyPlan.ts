@@ -5,14 +5,15 @@
  * per-room pages are for laying. It is drawn from the traced pixel coordinates,
  * so it reflects the actual plan rather than the per-room local origins.
  */
-import { roomOutline, roomArea } from '../core/geometry.js';
-import { globalExtent } from '../core/derive.js';
+import { roomOutline, roomArea } from '../core/geometry';
+import { globalExtent } from '../core/derive';
+import type { RoomWithLayout } from '../core/types';
 
 const AVAIL_W = 700;
 const AVAIL_H = 250;
 const MIN_LABELLED_EDGE_M = 1.0; // a key plan wants the shape at a glance, not every jog
 
-export function keyPlan(layouts, pxPerM) {
+export function keyPlan(layouts: RoomWithLayout[], pxPerM: number | null): string {
   if (!pxPerM) return '';
   const rooms = layouts.filter((l) => l.room.shapes.length);
   if (!rooms.length) return '';
@@ -32,7 +33,8 @@ export function keyPlan(layouts, pxPerM) {
   rooms.forEach(({ room }) => {
     // a global-coordinate twin, so the same outline code applies
     const twin = {
-      dir: 'x', sub: [],
+      id: room.id, name: room.name, code: room.code, skip: false,
+      dir: 'x' as const, sub: [], shapes: [],
       add: room.shapes.map((s) => ({
         x: (s.x - ext.minX) / pxPerM, y: (s.y - ext.minY) / pxPerM,
         w: s.w / pxPerM, h: s.h / pxPerM,
@@ -42,8 +44,8 @@ export function keyPlan(layouts, pxPerM) {
       g += `<rect x="${pad + a.x * sc}" y="${pad + a.y * sc}" width="${a.w * sc}" height="${a.h * sc}" fill="#f2f2f2" stroke="none"/>`;
     });
     roomOutline(twin).forEach((sg) => {
-      const a = sg.vertical ? [sg.x, sg.y1] : [sg.x1, sg.y];
-      const b = sg.vertical ? [sg.x, sg.y2] : [sg.x2, sg.y];
+      const a: [number, number] = sg.vertical ? [sg.x, sg.y1] : [sg.x1, sg.y];
+      const b: [number, number] = sg.vertical ? [sg.x, sg.y2] : [sg.x2, sg.y];
       g += `<line x1="${pad + a[0] * sc}" y1="${pad + a[1] * sc}" x2="${pad + b[0] * sc}" y2="${pad + b[1] * sc}" stroke="#000" stroke-width="1.3"/>`;
       if (sg.len >= MIN_LABELLED_EDGE_M) {
         const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;

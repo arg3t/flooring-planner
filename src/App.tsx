@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
-import { ProjectProvider, useProject } from './state/store.jsx';
-import PlanPanel from './components/PlanPanel.jsx';
-import MaterialPanel from './components/MaterialPanel.jsx';
-import RoomList from './components/RoomList.jsx';
-import Results from './components/Results.jsx';
-import HelpModal from './components/HelpModal.jsx';
-import { buildReport } from './report/buildReport.js';
+import { useState } from 'react';
+import { ProjectProvider, useProject } from './state/store';
+import PlanPanel from './components/PlanPanel';
+import MaterialPanel from './components/MaterialPanel';
+import RoomList from './components/RoomList';
+import Results from './components/Results';
+import HelpModal from './components/HelpModal';
+import { buildReport } from './report/buildReport';
 
 /**
  * Opening the manual.
@@ -16,11 +16,11 @@ import { buildReport } from './report/buildReport.js';
  */
 function useManualExport() {
   const { derivedRooms, state, scale } = useProject();
-  const [note, setNote] = useState(null);
+  const [note, setNote] = useState<string | null>(null);
   const open = () => {
     const html = buildReport(derivedRooms, state.material, scale.pxPerM);
     if (!html) { setNote('Nothing to print yet — trace a room and pin one known length.'); return; }
-    let win = null;
+    let win: Window | null = null;
     try { win = window.open('', '_blank'); } catch { /* blocked */ }
     if (win && win.document) { win.document.open(); win.document.write(html); win.document.close(); return; }
     try {

@@ -6,12 +6,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { JSDOM } from 'jsdom';
+import { JSDOM, type DOMWindow } from 'jsdom';
 
 const HTML = fs.readFileSync(new URL('../dist/index.html', import.meta.url), 'utf8');
 
-function makeStorage(cap = 5e6) {
-  const m = {};
+interface Storage {
+  getItem: (k: string) => string | null;
+  setItem: (k: string, v: string) => void;
+  removeItem: (k: string) => void;
+}
+
+function makeStorage(cap = 5e6): Storage {
+  const m: Record<string, string> = {};
   return {
     getItem: (k) => (k in m ? m[k] : null),
     setItem: (k, v) => { if (v.length > cap) { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; } m[k] = v; },
@@ -19,18 +25,18 @@ function makeStorage(cap = 5e6) {
   };
 }
 
-function ctxStub() {
+function ctxStub(): unknown {
   return new Proxy({}, {
-    get: (t, k) => (k === 'canvas' ? { width: 0, height: 0 } : k === 'measureText' ? () => ({ width: 10 }) : () => {}),
+    get: (_t, k) => (k === 'canvas' ? { width: 0, height: 0 } : k === 'measureText' ? () => ({ width: 10 }) : () => {}),
     set: () => true,
   });
 }
 
-async function boot(storage = makeStorage()) {
+async function boot(storage: Storage = makeStorage()): Promise<JSDOM> {
   const dom = new JSDOM(HTML, {
     runScripts: 'dangerously', pretendToBeVisual: true, url: 'https://local/',
     beforeParse(w) {
-      w.HTMLCanvasElement.prototype.getContext = () => ctxStub();
+      w.HTMLCanvasElement.prototype.getContext = (() => ctxStub()) as HTMLCanvasElement['getContext'];
       w.HTMLElement.prototype.setPointerCapture = () => {};
       Object.defineProperty(w.HTMLElement.prototype, 'clientWidth', { get() { return 600; }, configurable: true });
       Object.defineProperty(w, 'localStorage', { value: storage, configurable: true });
@@ -44,10 +50,16 @@ async function boot(storage = makeStorage()) {
   return dom;
 }
 
+function clickButton(d: Document, w: DOMWindow, pattern: RegExp): void {
+  const btn = [...d.querySelectorAll('button')].find((b) => pattern.test(b.textContent || ''));
+  assert.ok(btn, `no button matching ${pattern}`);
+  btn.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+}
+
 test('app mounts with panels in the right order', async () => {
   const dom = await boot();
   const d = dom.window.document;
-  const headings = [...d.querySelectorAll('.panel h2')].map((h) => h.textContent.replace(/\?.*/, '').trim());
+  const headings = [...d.querySelectorAll('.panel h2')].map((h) => (h.textContent || '').replace(/\?.*/, '').trim());
   assert.equal(headings[0], '01 Floor plan');
   assert.equal(headings[1], '02 Material', 'material must sit above the rooms list');
   assert.equal(headings[2], '03 Rooms');
@@ -57,9 +69,9 @@ test('starts empty: no plan, one blank room, no scale', async () => {
   const dom = await boot();
   const d = dom.window.document;
   assert.equal(d.querySelectorAll('.room-card').length, 1);
-  assert.match(d.querySelector('.dropzone').textContent, /upload a floor plan/i);
-  assert.match(d.querySelector('.scalestate').textContent, /No scale yet/);
-  assert.match(d.body.textContent, /Nothing to lay yet/);
+  assert.match(d.querySelector('.dropzone')!.textContent || '', /upload a floor plan/i);
+  assert.match(d.querySelector('.scalestate')!.textContent || '', /No scale yet/);
+  assert.match(d.body.textContent || '', /Nothing to lay yet/);
 });
 
 test('no seeded apartment geometry ships in the bundle', () => {
@@ -70,12 +82,11 @@ test('no seeded apartment geometry ships in the bundle', () => {
 test('help modal opens and closes', async () => {
   const dom = await boot();
   const d = dom.window.document;
-  const btn = [...d.querySelectorAll('button')].find((b) => /How to use/.test(b.textContent));
-  assert.ok(btn);
-  btn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  clickButton(d, dom.window, /How to use/);
   await new Promise((r) => setTimeout(r, 40));
   assert.ok(d.querySelector('.modal'), 'modal should be open');
-  [...d.querySelectorAll('.modal button')].pop().dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  const closeBtn = [...d.querySelectorAll('.modal button')].pop();
+  closeBtn!.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
   await new Promise((r) => setTimeout(r, 40));
   assert.equal(d.querySelector('.modal'), null);
 });
@@ -89,16 +100,15 @@ test('tooltips carry the explanations instead of body text', async () => {
 test('material inputs are wired to the reducer', async () => {
   const dom = await boot();
   const d = dom.window.document;
-  const input = d.getElementById('mat-plankLen');
+  const input = d.getElementById('mat-plankLen') as HTMLInputElement | null;
   assert.ok(input);
-  assert.equal(input.value, '1220');
+  assert.equal(input!.value, '1220');
 });
 
 test('adding a room adds a card and an editor', async () => {
   const dom = await boot();
   const d = dom.window.document;
-  const add = [...d.querySelectorAll('button')].find((b) => /Add room/.test(b.textContent));
-  add.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  clickButton(d, dom.window, /Add room/);
   await new Promise((r) => setTimeout(r, 60));
   assert.equal(d.querySelectorAll('.room-card').length, 2);
   assert.equal(d.querySelectorAll('.editor canvas').length, 2);
@@ -108,16 +118,15 @@ test('autosave writes and a reload restores', async () => {
   const storage = makeStorage();
   const dom = await boot(storage);
   const d = dom.window.document;
-  const add = [...d.querySelectorAll('button')].find((b) => /Add room/.test(b.textContent));
-  add.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  clickButton(d, dom.window, /Add room/);
   await new Promise((r) => setTimeout(r, 900));
   const raw = storage.getItem('plankPlanner.project.v1');
   assert.ok(raw, 'nothing was autosaved');
-  assert.equal(JSON.parse(raw).rooms.length, 2);
+  assert.equal(JSON.parse(raw!).rooms.length, 2);
 
   const again = await boot(storage);
   assert.equal(again.window.document.querySelectorAll('.room-card').length, 2, 'rooms did not come back');
-  assert.match(again.window.document.querySelector('.top .sub').textContent, /restored/);
+  assert.match(again.window.document.querySelector('.top .sub')!.textContent || '', /restored/);
 });
 
 test('the only per-room layout choice is plank direction', async () => {
@@ -131,8 +140,7 @@ test('the only per-room layout choice is plank direction', async () => {
 test('storage failure degrades instead of throwing', async () => {
   const dom = await boot(makeStorage(10)); // quota so small nothing fits
   const d = dom.window.document;
-  const add = [...d.querySelectorAll('button')].find((b) => /Add room/.test(b.textContent));
-  add.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  clickButton(d, dom.window, /Add room/);
   await new Promise((r) => setTimeout(r, 900));
-  assert.match(d.querySelector('.top .sub').textContent, /unavailable/);
+  assert.match(d.querySelector('.top .sub')!.textContent || '', /unavailable/);
 });

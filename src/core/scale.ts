@@ -7,8 +7,14 @@
  * exists nothing can be measured and the UI must say so rather than invent a
  * number; after the first, every edge in every room is determined.
  */
+import type { Pin, ScaleBar, ScaleObservation, ScaleResult, ShapePx } from './types';
 
-export function pinPixelLength(rooms, pin) {
+export interface RoomWithShapes {
+  id: number;
+  shapes: ShapePx[];
+}
+
+export function pinPixelLength(rooms: RoomWithShapes[], pin: Pin): number | null {
   const room = rooms.find((r) => r.id === pin.roomId);
   if (!room) return null;
   const shape = room.shapes.find((s) => s.id === pin.shapeId);
@@ -24,8 +30,8 @@ const MIN_USABLE_PX = 4; // a shorter edge is a mis-drag, not a measurement
  * a 40 px one. Residuals come back per observation so a mistyped pin is visible
  * instead of quietly dragging the scale.
  */
-export function solveScale(rooms, pins, scaleBar) {
-  const obs = [];
+export function solveScale(rooms: RoomWithShapes[], pins: Pin[], scaleBar: ScaleBar | null): ScaleResult {
+  const obs: ScaleObservation[] = [];
   if (scaleBar && scaleBar.metres > 0) {
     const len = Math.hypot(scaleBar.x2 - scaleBar.x1, scaleBar.y2 - scaleBar.y1);
     if (len > MIN_USABLE_PX) obs.push({ px: len, m: scaleBar.metres, weight: len * 1.5, label: 'scale bar' });
@@ -40,5 +46,5 @@ export function solveScale(rooms, pins, scaleBar) {
   obs.forEach((o) => { num += o.weight * (o.px / o.m); den += o.weight; });
   const pxPerM = num / den;
   obs.forEach((o) => { o.impliedM = o.px / pxPerM; o.errPct = ((o.impliedM - o.m) / o.m) * 100; });
-  return { pxPerM, residual: Math.max(...obs.map((o) => Math.abs(o.errPct))), observations: obs };
+  return { pxPerM, residual: Math.max(...obs.map((o) => Math.abs(o.errPct as number))), observations: obs };
 }

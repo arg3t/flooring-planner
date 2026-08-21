@@ -8,27 +8,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { JSDOM } from 'jsdom';
+import { JSDOM, type DOMWindow } from 'jsdom';
 
 const HTML = fs.readFileSync(new URL('../dist/index.html', import.meta.url), 'utf8');
 
-function ctxStub() {
+function ctxStub(): unknown {
   return new Proxy({}, {
-    get: (t, k) => (k === 'canvas' ? { width: 0, height: 0 } : k === 'measureText' ? () => ({ width: 10 }) : () => {}),
+    get: (_t, k) => (k === 'canvas' ? { width: 0, height: 0 } : k === 'measureText' ? () => ({ width: 10 }) : () => {}),
     set: () => true,
   });
 }
 
-async function boot() {
-  const store = {};
+async function boot(): Promise<JSDOM> {
+  const store: Record<string, string> = {};
   const dom = new JSDOM(HTML, {
     runScripts: 'dangerously', pretendToBeVisual: true, url: 'https://local/',
     beforeParse(w) {
-      w.HTMLCanvasElement.prototype.getContext = () => ctxStub();
+      w.HTMLCanvasElement.prototype.getContext = (() => ctxStub()) as HTMLCanvasElement['getContext'];
       w.HTMLElement.prototype.setPointerCapture = () => {};
       Object.defineProperty(w.HTMLElement.prototype, 'clientWidth', { get() { return 600; }, configurable: true });
       Object.defineProperty(w, 'localStorage', {
-        value: { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v; }, removeItem: (k) => { delete store[k]; } },
+        value: { getItem: (k: string) => store[k] ?? null, setItem: (k: string, v: string) => { store[k] = v; }, removeItem: (k: string) => { delete store[k]; } },
         configurable: true,
       });
       w.confirm = () => true;
@@ -39,16 +39,15 @@ async function boot() {
   return dom;
 }
 
-/** A canvas with an identity transform, so client coords are image coords. */
 /** Attach an image and pin the view so client coords equal image coords. */
-async function useImage(w, img) {
-  w.__plankPlanner.setImage(img);
+async function useImage(w: DOMWindow, img: HTMLImageElement): Promise<void> {
+  w.__plankPlanner!.setImage(img);
   await new Promise((r) => setTimeout(r, 80));
-  const roomId = w.__plankPlanner.getState().rooms[0].id;
-  w.__plankPlannerEditors.get(roomId).setView({ s: 1, tx: 0, ty: 0 });
+  const roomId = w.__plankPlanner!.getState().rooms[0].id;
+  w.__plankPlannerEditors!.get(roomId)!.setView({ s: 1, tx: 0, ty: 0 });
 }
 
-const rooms = (w) => w.__plankPlanner.getState().rooms;
+const rooms = (w: DOMWindow) => w.__plankPlanner!.getState().rooms;
 
 async function readyCanvas() {
   const dom = await boot();
@@ -58,18 +57,18 @@ async function readyCanvas() {
   const img = new w.Image();
   Object.defineProperty(img, 'width', { value: 1000 });
   Object.defineProperty(img, 'height', { value: 800 });
-  const canvas = d.querySelector('.editor canvas');
-  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 600, height: 400 });
+  const canvas = d.querySelector('.editor canvas') as HTMLCanvasElement;
+  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 600, height: 400 }) as DOMRect;
   return { dom, w, d, canvas, img };
 }
 
-function pointer(w, canvas, type, x, y) {
+function pointer(w: DOMWindow, canvas: HTMLCanvasElement, type: string, x: number, y: number): void {
   const ev = new w.Event(type, { bubbles: true });
   Object.assign(ev, { pointerId: 1, clientX: x, clientY: y, button: 0 });
   canvas.dispatchEvent(ev);
 }
 
-async function drag(w, canvas, from, to) {
+async function drag(w: DOMWindow, canvas: HTMLCanvasElement, from: [number, number], to: [number, number]): Promise<void> {
   pointer(w, canvas, 'pointerdown', from[0], from[1]);
   await new Promise((r) => setTimeout(r, 20));
   pointer(w, canvas, 'pointermove', to[0], to[1]);
@@ -79,7 +78,7 @@ async function drag(w, canvas, from, to) {
 }
 
 test('dragging in Draw mode creates a shape of the dragged size', async () => {
-  const { w, d, canvas, img } = await readyCanvas();
+  const { w, canvas, img } = await readyCanvas();
   await useImage(w, img);
 
   await drag(w, canvas, [100, 100], [340, 260]);

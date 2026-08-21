@@ -6,12 +6,18 @@
  * the two — deciding a length because an offcut happens to be lying around — was
  * the earlier approach and it produced worse packing and unpredictable staggers.
  */
-import { stackBands, bandSpans, roomBounds, roomArea } from './geometry.js';
+import { stackBands, bandSpans, roomBounds, roomArea } from './geometry';
+import type { Bin, DerivedRoom, Material, Piece, PlanEmpty, PlanFull, Plan, RoomLayout, Row } from './types';
 
-export const DEFAULT_MATERIAL = {
+export const DEFAULT_MATERIAL: Material = {
   plankLen: 1220, plankWid: 229, packArea: 2.73, packPrice: 24.41,
   gap: 8, kerf: 2, minPiece: 300, minStagger: 300,
 };
+
+/** Carries the previous row's closing piece length across `layoutRoom` calls. */
+export interface LayoutState {
+  lastEnd: number | null;
+}
 
 /**
  * Plan one room into rows of plank pieces.
@@ -24,37 +30,37 @@ export const DEFAULT_MATERIAL = {
  * next row can start with its offcut, which is what makes one plank serve two
  * rows with no waste.
  */
-export function layoutRoom(room, m, state) {
+export function layoutRoom(room: DerivedRoom, m: Material, state: LayoutState): RoomLayout {
   const { plankLen: L, plankWid: W, gap, minPiece, minStagger } = m;
   const bands = stackBands(room, W, gap);
-  const rows = [];
-  const segStarts = {}; // previous row's start offset, per run index
+  const rows: Row[] = [];
+  const segStarts: Record<number, number> = {}; // previous row's start offset, per run index
 
   bands.forEach((band) => {
     const spans = bandSpans(room, band.s0, band.s1, gap);
     if (!spans.length) return;
-    const pieces = [];
+    const pieces: Piece[] = [];
     spans.forEach((sp, si) => {
       let remaining = sp.end - sp.start;
       let cursor = sp.start;
       let first = true;
       while (remaining > 0.5) {
-        let len;
+        let len: number;
         if (first) {
-          const tailOK = (s) => {
+          const tailOK = (s: number) => {
             if (s >= remaining - 0.5) return true;
             const tail = (remaining - s) % L;
             return tail < 0.5 || tail >= minPiece;
           };
           const above = segStarts[si] !== undefined ? segStarts[si] : -99999;
-          const valid = (s) => s >= minPiece && s <= remaining + 0.5 && Math.abs(s - above) >= minStagger && tailOK(s);
+          const valid = (s: number) => s >= minPiece && s <= remaining + 0.5 && Math.abs(s - above) >= minStagger && tailOK(s);
           const chain = state.lastEnd !== null ? L - state.lastEnd - m.kerf : null;
-          const ladder = [];
+          const ladder: number[] = [];
           for (let v = minPiece; v <= L; v += 10) ladder.push(v);
-          const cands = [chain, ...ladder].filter((v) => v !== null && v >= minPiece && v <= Math.min(L, remaining) + 0.5);
+          const cands = [chain, ...ladder].filter((v): v is number => v !== null && v >= minPiece && v <= Math.min(L, remaining) + 0.5);
           len = cands.find(valid)
             ?? cands.find((s) => Math.abs(s - above) >= minStagger)
-            ?? cands.sort((a, b) => Math.abs(b - above) - Math.abs(a - above))[0]
+            ?? cands.slice().sort((a, b) => Math.abs(b - above) - Math.abs(a - above))[0]
             ?? Math.min(Math.max(minPiece, Math.round(L * 0.5)), remaining);
           len = Math.min(len, remaining);
           segStarts[si] = len;
@@ -84,22 +90,21 @@ export function layoutRoom(room, m, state) {
 /**
  * One-dimensional cutting stock, best-fit decreasing.
  *
- * Longest pieces first into the tightest plank that still fits; kerf is charged
- * for every cut after the first on a plank, so a 1220 board never yields 610+610.
- * Not provably optimal — that is NP-hard — but within a plank or two of it here,
- * and it runs instantly on a few hundred pieces.
+ * Best-fit rather than first-fit: it packs the piece into whichever open plank
+ * leaves the least room left over, which is what turns offcuts into the next
+ * piece instead of unusable scrap scattered across many planks.
  */
-export function packCuts(pieces, plankLen, kerf) {
+export function packCuts(pieces: Piece[], plankLen: number, kerf: number): Bin[] {
   const sorted = [...pieces].sort((a, b) => b.len - a.len);
-  const bins = [];
+  const bins: Bin[] = [];
   sorted.forEach((pc) => {
-    let best = null, bestRemainder = Infinity;
+    let best: Bin | null = null, bestRemainder = Infinity;
     bins.forEach((bin) => {
       const need = bin.pieces.length ? pc.len + kerf : pc.len;
       const rem = bin.free - need;
       if (rem >= -0.001 && rem < bestRemainder) { best = bin; bestRemainder = rem; }
     });
-    if (!best) { best = { id: bins.length + 1, free: plankLen, pieces: [] }; bins.push(best); }
+    if (!best) { best = { id: bins.length + 1, free: plankLen, pieces: [], label: '', waste: 0, cuts: 0 }; bins.push(best); }
     best.free -= best.pieces.length ? pc.len + kerf : pc.len;
     best.pieces.push(pc);
   });
@@ -119,14 +124,14 @@ export function packCuts(pieces, plankLen, kerf) {
  * One computation feeds both the screen and the printed manual so the two can
  * never disagree about what to cut.
  */
-export function computePlan(rooms, material) {
-  const m = { ...DEFAULT_MATERIAL, ...material };
+export function computePlan(rooms: DerivedRoom[], material: Partial<Material>): Plan {
+  const m: Material = { ...DEFAULT_MATERIAL, ...material };
   const active = rooms.filter((r) => !r.skip && r.add.length);
-  if (!active.length) return { empty: true, material: m };
+  if (!active.length) return { empty: true, material: m } satisfies PlanEmpty;
 
-  const state = { lastEnd: null };
-  const layouts = [];
-  const allCuts = [];
+  const state: LayoutState = { lastEnd: null };
+  const layouts: PlanFull['layouts'] = [];
+  const allCuts: Piece[] = [];
   let full = 0, area = 0;
 
   active.forEach((room) => {
@@ -152,5 +157,5 @@ export function computePlan(rooms, material) {
     costIncVat: (packs * m.packPrice * 1.21).toFixed(2),
     overPct: (((buyArea / area) - 1) * 100).toFixed(1),
     naivePlanks: full + allCuts.length,
-  };
+  } satisfies PlanFull;
 }

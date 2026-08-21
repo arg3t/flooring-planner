@@ -5,26 +5,41 @@
  * frame rate and dispatching through the reducer per move would be wasteful — and
  * committed to the store on release, where they are welded and copied.
  */
-import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { useProject } from '../state/store.jsx';
-import { snapCandidates, snapValue, SNAP_SCREEN_PX } from '../core/snapping.js';
+import { useRef, useEffect, useState, useCallback } from 'react';
+import { useProject } from '../state/store';
+import { snapCandidates, snapValue, SNAP_SCREEN_PX } from '../core/snapping';
+import type { Edge, Room, ShapePx } from '../core/types';
+import type { EditorViewHandle } from '../global';
 
-const HANDLES = [[0, 0, 'nw'], [0.5, 0, 'n'], [1, 0, 'ne'], [1, 0.5, 'e'], [1, 1, 'se'], [0.5, 1, 's'], [0, 1, 'sw'], [0, 0.5, 'w']];
+type HandleKey = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+const HANDLES: [number, number, HandleKey][] = [
+  [0, 0, 'nw'], [0.5, 0, 'n'], [1, 0, 'ne'], [1, 0.5, 'e'], [1, 1, 'se'], [0.5, 1, 's'], [0, 1, 'sw'], [0, 0.5, 'w'],
+];
 const MIN_DRAW_PX = 5;
 const DRAFT_ID = -1;   // the shape being dragged out, not yet in the store
 
-export default function ShapeEditor({ room }) {
+interface Point { x: number; y: number }
+interface View { s: number; tx: number; ty: number }
+
+type Drag =
+  | { mode: 'bar'; x0: number; y0: number; x1: number; y1: number }
+  | { mode: 'pan'; sx: number; sy: number; tx: number; ty: number }
+  | { mode: 'draw'; x0: number; y0: number }
+  | { mode: 'move'; ox: number; oy: number; id: number }
+  | { mode: 'resize'; k: HandleKey; orig: ShapePx };
+
+export default function ShapeEditor({ room }: { room: Room }) {
   const { state, dispatch, scale } = useProject();
-  const wrapRef = useRef(null);
-  const canvasRef = useRef(null);
-  const viewRef = useRef({ s: 1, tx: 0, ty: 0 });
-  const dragRef = useRef(null);
-  const pointersRef = useRef(new Map());
-  const pinchRef = useRef(null);
-  const shapesRef = useRef(room.shapes);
-  const [tool, setTool] = useState('draw');
-  const [selId, setSelId] = useState(null);
-  const [edgeBox, setEdgeBox] = useState(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const viewRef = useRef<View>({ s: 1, tx: 0, ty: 0 });
+  const dragRef = useRef<Drag | null>(null);
+  const pointersRef = useRef(new Map<number, Point>());
+  const pinchRef = useRef<{ d: number; c: Point } | null>(null);
+  const shapesRef = useRef<ShapePx[]>(room.shapes);
+  const [tool, setTool] = useState<'draw' | 'select' | 'pan' | 'bar'>('draw');
+  const [selId, setSelId] = useState<number | null>(null);
+  const [edgeBox, setEdgeBox] = useState<{ edge: Edge; x: number; y: number } | null>(null);
   const [, force] = useState(0);
   const redraw = useCallback(() => force((n) => n + 1), []);
 
@@ -52,12 +67,12 @@ export default function ShapeEditor({ room }) {
 
   useEffect(() => { fit(); redraw(); }, [fit, redraw]);
 
-  // part of the testing seam described in store.jsx: lets a test pin the view
+  // part of the testing seam described in store.tsx: lets a test pin the view
   // transform so client coordinates map straight onto image coordinates
   useEffect(() => {
-    const registry = (window.__plankPlannerEditors ||= new Map());
-    registry.set(room.id, { setView: (v) => { viewRef.current = { ...v }; redraw(); } });
-    return () => registry.delete(room.id);
+    const registry = (window.__plankPlannerEditors ??= new Map<number, EditorViewHandle>());
+    registry.set(room.id, { setView: (v: View) => { viewRef.current = { ...v }; redraw(); } });
+    return () => { registry.delete(room.id); };
   }, [room.id, redraw]);
 
   /* ---- painting ---- */
@@ -70,9 +85,10 @@ export default function ShapeEditor({ room }) {
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
     const c = canvas.getContext('2d');
+    if (!c) return;
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     const view = viewRef.current;
-    const toScreen = (p) => ({ x: p.x * view.s + view.tx, y: p.y * view.s + view.ty });
+    const toScreen = (p: Point) => ({ x: p.x * view.s + view.tx, y: p.y * view.s + view.ty });
 
     c.clearRect(0, 0, w, h);
     c.fillStyle = '#0a1b2a';
@@ -115,8 +131,11 @@ export default function ShapeEditor({ room }) {
 
       c.font = '10px IBM Plex Mono';
       c.textBaseline = 'middle';
-      [['top', s.w, a.x + sw / 2, a.y - 6], ['bottom', s.w, a.x + sw / 2, a.y + sh + 13],
-       ['left', s.h, a.x - 6, a.y + sh / 2], ['right', s.h, a.x + sw + 6, a.y + sh / 2]].forEach(([edge, px, tx, ty]) => {
+      const labels: [Edge, number, number, number][] = [
+        ['top', s.w, a.x + sw / 2, a.y - 6], ['bottom', s.w, a.x + sw / 2, a.y + sh + 13],
+        ['left', s.h, a.x - 6, a.y + sh / 2], ['right', s.h, a.x + sw + 6, a.y + sh / 2],
+      ];
+      labels.forEach(([edge, px, tx, ty]) => {
         if ((edge === 'top' || edge === 'bottom') && sw < 44) return;
         if ((edge === 'left' || edge === 'right') && sh < 34) return;
         const pin = state.pins.find((p) => p.roomId === room.id && p.shapeId === s.id && p.edge === edge);
@@ -148,13 +167,13 @@ export default function ShapeEditor({ room }) {
   });
 
   /* ---- pointer ---- */
-  const evPt = (e) => {
-    const r = canvasRef.current.getBoundingClientRect();
+  const evPt = (e: { clientX: number; clientY: number }): Point => {
+    const r = canvasRef.current!.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
-  const toImage = (p) => ({ x: (p.x - viewRef.current.tx) / viewRef.current.s, y: (p.y - viewRef.current.ty) / viewRef.current.s });
+  const toImage = (p: Point): Point => ({ x: (p.x - viewRef.current.tx) / viewRef.current.s, y: (p.y - viewRef.current.ty) / viewRef.current.s });
 
-  const zoomAt = (pt, f) => {
+  const zoomAt = (pt: Point, f: number) => {
     const v = viewRef.current;
     const before = toImage(pt);
     v.s = Math.max(0.05, Math.min(40, v.s * f));
@@ -164,7 +183,7 @@ export default function ShapeEditor({ room }) {
     redraw();
   };
 
-  const hitHandle = (p) => {
+  const hitHandle = (p: Point): HandleKey | null => {
     const s = sel();
     if (!s) return null;
     const tol = 11 / viewRef.current.s;
@@ -173,7 +192,7 @@ export default function ShapeEditor({ room }) {
     }
     return null;
   };
-  const hitEdge = (p) => {
+  const hitEdge = (p: Point): Edge | null => {
     const s = sel();
     if (!s) return null;
     const tol = 10 / viewRef.current.s;
@@ -185,10 +204,10 @@ export default function ShapeEditor({ room }) {
     if (inY && Math.abs(p.x - (s.x + s.w)) < tol) return 'right';
     return null;
   };
-  const hitShape = (p) => [...shapesRef.current].reverse().find((s) => p.x >= s.x && p.x <= s.x + s.w && p.y >= s.y && p.y <= s.y + s.h) || null;
+  const hitShape = (p: Point): ShapePx | null => [...shapesRef.current].reverse().find((s) => p.x >= s.x && p.x <= s.x + s.w && p.y >= s.y && p.y <= s.y + s.h) || null;
 
-  const onDown = (e) => {
-    canvasRef.current.setPointerCapture?.(e.pointerId);
+  const onDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    canvasRef.current?.setPointerCapture?.(e.pointerId);
     pointersRef.current.set(e.pointerId, evPt(e));
     if (pointersRef.current.size === 2) {
       const [a, b] = [...pointersRef.current.values()];
@@ -209,7 +228,11 @@ export default function ShapeEditor({ room }) {
     // tiling rooms together needs.
     if (tool !== 'draw') {
       const hk = hitHandle(p);
-      if (hk) { const orig = { ...sel() }; beginGesture(); dragRef.current = { mode: 'resize', k: hk, orig }; return; }
+      if (hk) {
+        const current = sel();
+        if (current) { const orig = { ...current }; beginGesture(); dragRef.current = { mode: 'resize', k: hk, orig }; }
+        return;
+      }
       const ek = hitEdge(p);
       if (ek) { setEdgeBox({ edge: ek, x: scr.x, y: scr.y }); return; }
       const hs = hitShape(p);
@@ -222,7 +245,7 @@ export default function ShapeEditor({ room }) {
 
     const cand = snapCandidates(state.rooms, null);
     const tol = SNAP_SCREEN_PX / viewRef.current.s;
-    const shape = { id: DRAFT_ID, x: snapValue(p.x, cand.xs, tol), y: snapValue(p.y, cand.ys, tol), w: 1, h: 1 };
+    const shape: ShapePx = { id: DRAFT_ID, x: snapValue(p.x, cand.xs, tol), y: snapValue(p.y, cand.ys, tol), w: 1, h: 1 };
     beginGesture();
     shapesRef.current.push(shape);
     setSelId(DRAFT_ID);
@@ -230,7 +253,7 @@ export default function ShapeEditor({ room }) {
     redraw();
   };
 
-  const onMove = (e) => {
+  const onMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!pointersRef.current.has(e.pointerId)) return;
     pointersRef.current.set(e.pointerId, evPt(e));
     if (pinchRef.current && pointersRef.current.size === 2) {
@@ -290,7 +313,7 @@ export default function ShapeEditor({ room }) {
     redraw();
   };
 
-  const onUp = (e) => {
+  const onUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     pointersRef.current.delete(e.pointerId);
     if (pointersRef.current.size < 2) pinchRef.current = null;
     const drag = dragRef.current;
@@ -334,15 +357,15 @@ export default function ShapeEditor({ room }) {
     setSelId(null);
   };
 
-  const commitEdge = (value) => {
+  const commitEdge = (value: string) => {
     const metres = parseFloat(String(value).replace(',', '.'));
     const s = sel();
-    if (!s || !(metres > 0)) { setEdgeBox(null); return; }
+    if (!s || !(metres > 0) || !edgeBox) { setEdgeBox(null); return; }
     dispatch({ type: 'setPin', roomId: room.id, shapeId: s.id, edge: edgeBox.edge, metres });
     setEdgeBox(null);
   };
 
-  const pinFor = (edge) => {
+  const pinFor = (edge: Edge) => {
     const s = sel();
     return s ? state.pins.find((p) => p.roomId === room.id && p.shapeId === s.id && p.edge === edge) : null;
   };
@@ -355,7 +378,7 @@ export default function ShapeEditor({ room }) {
   return (
     <div className="editor" ref={wrapRef}>
       <div className="etools">
-        {['draw', 'select', 'pan', 'bar'].map((t) => (
+        {(['draw', 'select', 'pan', 'bar'] as const).map((t) => (
           <button key={t} className={`btn sm${tool === t ? ' on' : ''}`} onClick={() => setTool(t)}>
             {t === 'bar' ? 'Scale bar' : t[0].toUpperCase() + t.slice(1)}
           </button>
@@ -390,7 +413,7 @@ export default function ShapeEditor({ room }) {
               onKeyDown={(e) => { if (e.key === 'Enter') commitEdge(e.currentTarget.value); }}
               id="edge-value"
             />
-            <button className="btn sm" onClick={() => commitEdge(document.getElementById('edge-value').value)}>Set</button>
+            <button className="btn sm" onClick={() => commitEdge((document.getElementById('edge-value') as HTMLInputElement).value)}>Set</button>
             <button className="btn sm" onClick={() => { dispatch({ type: 'clearPin', roomId: room.id, shapeId: s.id, edge: edgeBox.edge }); setEdgeBox(null); }}>Clear</button>
           </div>
         </div>

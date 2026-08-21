@@ -1,6 +1,4 @@
-import React from 'react';
-
-const STEPS = [
+const STEPS: [string, string][] = [
   ['Upload the floor plan.', 'Any photo or export of the drawing works, as long as it is to scale.'],
   ['Add a room and draw its shape.', 'Drag rectangles over the room. Use several for an L-shape — they snap flush so no gaps are left. Leave out fitted kitchen units: you lay up to them, not under them.'],
   ['Pin one known length.', 'Switch to Select, tap an edge, type the length printed on the plan. Every other edge in every room resolves from it. Pin a second anywhere as a cross-check.'],
@@ -8,7 +6,7 @@ const STEPS = [
   ['Calculate, then export the manual.', 'You get a job sheet with a key plan, one block per room, and a cut sheet to work through at the saw.'],
 ];
 
-export default function HelpModal({ open, onClose }) {
+export default function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
   return (
     <div className="modal-bg open" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>

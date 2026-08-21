@@ -6,13 +6,18 @@
  * light tint with its ID printed on it, a ripped row a dot fill, a cut-out a
  * cross-hatch. The shapes are distinguishable with the colour thrown away.
  */
-import { roomOutline } from '../core/geometry.js';
-import { toRunStack } from '../core/geometry.js';
+import { roomOutline, toRunStack } from '../core/geometry';
+import type { DerivedRoom, RoomLayout } from '../core/types';
 
 const TARGET_W = 470;
 const TARGET_H = 225;
 
-export function printSvg(layout, room) {
+export interface PrintSvg {
+  svg: string;
+  width: number;
+}
+
+export function printSvg(layout: RoomLayout, room: DerivedRoom): PrintSvg {
   const sc = Math.min(TARGET_W / layout.runMax, TARGET_H / layout.stackMax, 0.26);
   const w = layout.runMax * sc;
   const h = layout.stackMax * sc;
@@ -54,9 +59,9 @@ export function printSvg(layout, room) {
 }
 
 /** Edge lengths in mm, pushed clear of one another so nothing overlaps. */
-function dimensions(room, sc, padL, padT) {
-  const map = (x, y) => (room.dir === 'x' ? [x * 1000, y * 1000] : [y * 1000, x * 1000]);
-  const placed = [];
+function dimensions(room: DerivedRoom, sc: number, padL: number, padT: number): string {
+  const map = (x: number, y: number): [number, number] => (room.dir === 'x' ? [x * 1000, y * 1000] : [y * 1000, x * 1000]);
+  const placed: { x: number; y: number }[] = [];
   let g = '';
   roomOutline(room).slice().sort((a, b) => b.len - a.len).forEach((sg) => {
     if (sg.len < 0.3) return;
@@ -67,7 +72,7 @@ function dimensions(room, sc, padL, padT) {
     let nx = 0, ny = 0;
     if (sg.vertical) { if (room.dir === 'x') nx = sg.out; else ny = sg.out; }
     else { if (room.dir === 'x') ny = sg.out; else nx = sg.out; }
-    let off = 9, tx, ty, tries = 0, clash;
+    let off = 9, tx = 0, ty = 0, tries = 0, clash;
     do {
       tx = padL + mx * sc + nx * off;
       ty = padT + my * sc + ny * off + (horizontalOnScreen ? (ny > 0 ? 6 : -2.5) : 2.5);
@@ -83,7 +88,7 @@ function dimensions(room, sc, padL, padT) {
 }
 
 /** Legend swatches. A CSS gradient does not survive every print path; SVG does. */
-export function swatch(kind) {
+export function swatch(kind: 'full' | 'cut' | 'rip' | 'void'): string {
   const fill = kind === 'cut' ? '#dcdcdc' : '#fff';
   let inner = '';
   if (kind === 'rip') inner = '<circle cx="3.2" cy="3.2" r="1.35"/><circle cx="6.8" cy="6.8" r="1.35"/>';

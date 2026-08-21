@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type ReactNode } from 'react';
 
 /** A `?` that explains something on hover, and on tap for touch. */
-export default function Tooltip({ children }) {
+export default function Tooltip({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
+  const ref = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     if (!open) return undefined;
-    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const close = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
     document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
   }, [open]);

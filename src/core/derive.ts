@@ -6,7 +6,9 @@
  * of step. Each room is placed at its own local origin because the layout engine
  * works per room; global positions are recovered separately for the key plan.
  */
-export function deriveRoom(room, pxPerM) {
+import type { RectM, ShapePx } from './types';
+
+export function deriveRoom<T extends { shapes: ShapePx[] }>(room: T, pxPerM: number | null): T & { add: RectM[]; sub: RectM[] } {
   if (!pxPerM || !room.shapes.length) return { ...room, add: [], sub: [] };
   const minX = Math.min(...room.shapes.map((s) => s.x));
   const minY = Math.min(...room.shapes.map((s) => s.y));
@@ -19,12 +21,19 @@ export function deriveRoom(room, pxPerM) {
   return { ...room, add, sub: [] };
 }
 
-export function deriveRooms(rooms, pxPerM) {
+export function deriveRooms<T extends { shapes: ShapePx[] }>(rooms: T[], pxPerM: number | null): (T & { add: RectM[]; sub: RectM[] })[] {
   return rooms.map((r) => deriveRoom(r, pxPerM));
 }
 
+export interface GlobalExtent {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
 /** Every room in true relative position, for the key plan. */
-export function globalExtent(rooms) {
+export function globalExtent<T extends { shapes: ShapePx[] }>(rooms: T[]): GlobalExtent | null {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   rooms.forEach((r) => r.shapes.forEach((s) => {
     minX = Math.min(minX, s.x); minY = Math.min(minY, s.y);

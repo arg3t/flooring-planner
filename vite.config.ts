@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -13,7 +13,7 @@ import { resolve } from 'node:path';
  * bundle is emitted as an IIFE and the module attribute stripped, which is also
  * why `inlineDynamicImports` is on — a code-split chunk could not be inlined.
  */
-function classicScript(outFile) {
+function classicScript(outFile: string): Plugin {
   return {
     name: 'classic-script',
     // Runs on the written file, after every other plugin. The only edit is the
